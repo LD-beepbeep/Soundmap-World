@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>SoundMap World/title>
+  <meta name="theme-color" content="#f7f7fb" />
+  <!-- Apple-style web app meta -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+  <!-- Leaflet (map) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-XQoYMqMTK8LvdlxU8qjQYqk0kQw2M2rG5zxY6p9a6Y7q2xv0kq1GZ6s9F7j3o1dM" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-sA+v6y6n1Z2qz6j1y6p3kz1Q9gxNQ9b1yM3h5aJ6b9m7kF4G5b2K" crossorigin=""></script>
+
+  <style>
+    :root{
+      --bg:#f7f7fb; --card:#fff; --accent:#007aff; --muted:#6b7280;
+      --glass: rgba(255,255,255,0.6);
+      --radius:18px;
+      --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom);
+    }
+    html,body{height:100%;margin:0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background:linear-gradient(180deg,#f7f7fb 0%, #eef2ff 100%); color:#111}
+    .app{
+      display:flex;flex-direction:column;min-height:100vh;gap:12px;padding:calc(12px + var(--safe-top)) 14px calc(14px + var(--safe-bottom));
+      box-sizing:border-box;max-width:720px;margin:0 auto;
+    }
+    header{display:flex;align-items:center;gap:12px}
+    .title{font-size:20px;font-weight:700}
+    .subtitle{font-size:12px;color:var(--muted)}
+
+    /* Map container */
+    #map{height:55vh;border-radius:18px;box-shadow:0 6px 18px rgba(15,23,42,0.08);overflow:hidden}
+
+    /* Controls card */
+    .card{background:var(--card);border-radius:var(--radius);padding:12px;box-shadow:0 6px 20px rgba(15,23,42,0.06)}
+    .row{display:flex;gap:8px;align-items:center}
+    .btn{background:linear-gradient(180deg,var(--accent),#0051d4);color:#fff;padding:12px 16px;border-radius:14px;box-shadow:0 6px 18px rgba(0,122,255,0.18);border:0;font-weight:600}
+    .btn.secondary{background:transparent;color:var(--accent);box-shadow:none;border:1px solid rgba(0,0,0,0.06)}
+    .mode-toggle{display:flex;gap:8px}
+    .pill{padding:8px 12px;border-radius:999px;background:var(--glass);backdrop-filter: blur(8px);border:1px solid rgba(0,0,0,0.04)}
+
+    /* Recording HUD */
+    .rec-hud{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(24px + var(--safe-bottom));z-index:60}
+    .rec-button{width:74px;height:74px;border-radius:999px;background:linear-gradient(180deg,#ff4d6d,#ff2a5b);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;box-shadow:0 12px 30px rgba(255,45,85,0.18);border:6px solid rgba(255,255,255,0.9)}
+    .rec-indicator{width:12px;height:12px;border-radius:50%;background:#fff;margin-left:8px;box-shadow:0 4px 8px rgba(255,0,64,0.12)}
+
+    /* List */
+    .list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .item{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,0.04);background:linear-gradient(180deg,#fff,#fbfbff)}
+    .meta{font-size:12px;color:var(--muted)}
+
+    /* small screens */
+    @media(min-width:720px){.app{padding:28px}}  
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <div class="title">SoundMap</div>
+        <div class="subtitle">Capture & replay the world</div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <div class="pill" id="gpsStatus">GPS: unknown</div>
+        <div class="pill" id="notifStatus">Notif: unknown</div>
+      </div>
+    </header>
+
+    <div id="map" class="card"></div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div style="display:flex;flex-direction:column">
+          <strong>Recording mode</strong>
+          <small class="meta">Hard — requires 50km radius to listen. Easy — listen anywhere.</small>
+        </div>
+        <div class="mode-toggle">
+          <button class="pill" id="easyBtn">Easy</button>
+          <button class="pill" id="hardBtn">Hard</button>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;justify-content:space-between">
+        <div style="display:flex;flex-direction:column">
+          <strong>Auto notification</strong>
+          <small class="meta">We will prompt you with a notification while the app runs asking to record.</small>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn secondary" id="startPrompts">Start prompts</button>
+          <button class="btn secondary" id="stopPrompts">Stop prompts</button>
+        </div>
+      </div>
+
+      <div class="list" id="recordingsList" style="margin-top:12px">
+        <!-- recordings appear here -->
+      </div>
+    </div>
+
+    <div class="rec-hud">
+      <button id="recBtn" class="rec-button" title="Record">●</button>
+    </div>
+  </div>
+
+  <!-- hidden audio element for playback -->
+  <audio id="player" controls style="display:none"></audio>
+
+  <script>
+  /*
+    Single-file PWA demo - SoundMap
+    - Uses Leaflet for the map
+    - Requests geolocation / notifications / microphone
+    - Records audio via MediaRecorder and stores in IndexedDB
+    - Shows markers and enforces "hard" (50km) or "easy" playback mode
+    - Creates and registers a service worker from an inline blob so the page can show notifications
+
+    NOTE: background scheduling & guaranteed push notifications require a server + Push API and are not implemented.
+  */
+
+  // -------------------- tiny IndexedDB helper --------------------
+  const DB_NAME = 'soundmap-db', STORE='recordings';
+  function openDB(){
+    return new Promise((res,rej)=>{
+      const rq = indexedDB.open(DB_NAME,1);
+      rq.onupgradeneeded = e => { const db=e.target.result; db.createObjectStore(STORE,{keyPath:'id'}); };
+      rq.onsuccess = e => res(e.target.result);
+      rq.onerror = e => rej(e.target.error);
+    });
+  }
+  async function saveRecording(record){
+    const db = await openDB();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction(STORE,'readwrite');
+      tx.objectStore(STORE).put(record);
+      tx.oncomplete = ()=>res(true);
+      tx.onerror = e=>rej(e.target.error);
+    });
+  }
+  async function getAllRecordings(){
+    const db = await openDB();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction(STORE,'readonly');
+      const req = tx.objectStore(STORE).getAll();
+      req.onsuccess = ()=>res(req.result||[]);
+      req.onerror = e=>rej(e.target.error);
+    });
+  }
+  async function getRecording(id){
+    const db = await openDB();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction(STORE,'readonly');
+      const req = tx.objectStore(STORE).get(id);
+      req.onsuccess = ()=>res(req.result);
+      req.onerror = e=>rej(e.target.error);
+    });
+  }
+
+  // -------------------- map --------------------
+  let map, userMarker, markersLayer;
+  function initMap(){
+    map = L.map('map', {zoomControl:false}).setView([51.505, -0.09], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:''}).addTo(map);
+    markersLayer = L.layerGroup().addTo(map);
+  }
+
+  // -------------------- UI & state --------------------
+  const gpsStatus = document.getElementById('gpsStatus');
+  const notifStatus = document.getElementById('notifStatus');
+  const recBtn = document.getElementById('recBtn');
+  const recordingsList = document.getElementById('recordingsList');
+  const player = document.getElementById('player');
+  let currentMode = 'easy'; // or 'hard'
+  document.getElementById('easyBtn').onclick = ()=>{ currentMode='easy'; refreshUI(); };
+  document.getElementById('hardBtn').onclick = ()=>{ currentMode='hard'; refreshUI(); };
+  function refreshUI(){
+    document.getElementById('easyBtn').style.opacity = currentMode==='easy'?1:0.6;
+    document.getElementById('hardBtn').style.opacity = currentMode==='hard'?1:0.6;
+  }
+  refreshUI();
+
+  // -------------------- geolocation live --------------------
+  let lastPosition = null;
+  function startGeolocation(){
+    if(!navigator.geolocation) return gpsStatus.textContent = 'GPS: unavailable';
+    navigator.geolocation.watchPosition(p=>{
+      lastPosition = p.coords;
+      gpsStatus.textContent = `GPS: ${p.coords.latitude.toFixed(4)}, ${p.coords.longitude.toFixed(4)}`;
+      if(!userMarker) userMarker = L.marker([p.coords.latitude,p.coords.longitude],{title:'You'}).addTo(map);
+      else userMarker.setLatLng([p.coords.latitude,p.coords.longitude]);
+    }, err=>{
+      gpsStatus.textContent = 'GPS: denied';
+    }, {enableHighAccuracy:true,maximumAge:5000});
+  }
+
+  // -------------------- distance util (km) --------------------
+  function distanceKm(lat1,lon1,lat2,lon2){
+    const toRad = v=>v*Math.PI/180;
+    const R=6371;
+    const dLat=toRad(lat2-lat1); const dLon=toRad(lon2-lon1);
+    const a=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
+    const c=2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    return R*c;
+  }
+
+  // -------------------- populate recordings list --------------------
+  async function renderRecordings(){
+    markersLayer.clearLayers();
+    const recs = await getAllRecordings();
+    recordingsList.innerHTML='';
+    recs.sort((a,b)=>b.t-a.t);
+    for(const r of recs){
+      const el = document.createElement('div'); el.className='item';
+      const left = document.createElement('div');
+      left.innerHTML = `<div style=\"font-weight:600\">${r.title||'Untitled'}</div><div class=\"meta\">${new Date(r.t).toLocaleString()} • ${r.lat.toFixed(3)}, ${r.lng.toFixed(3)}</div>`;
+      const right = document.createElement('div');
+      const play = document.createElement('button'); play.className='btn secondary'; play.textContent='Play';
+      play.onclick = async ()=>{ await tryPlay(r.id); };
+      const del = document.createElement('button'); del.className='btn secondary'; del.textContent='Delete'; del.onclick = async ()=>{ await deleteRecording(r.id); renderRecordings(); };
+      right.appendChild(play); right.appendChild(del);
+      el.appendChild(left); el.appendChild(right);
+      recordingsList.appendChild(el);
+
+      // add marker
+      const m = L.marker([r.lat,r.lng]).addTo(markersLayer).bindPopup(`<strong>${r.title||'Recording'}</strong><br>${new Date(r.t).toLocaleString()}`);
+      m.on('click', ()=>{ map.setView([r.lat,r.lng],15); });
+    }
+  }
+
+  async function deleteRecording(id){
+    const db = await openDB();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction(STORE,'readwrite');
+      tx.objectStore(STORE).delete(id);
+      tx.oncomplete = ()=>res();
+      tx.onerror = e=>rej(e.target.error);
+    });
+  }
+
+  // -------------------- playback rules --------------------
+  async function tryPlay(id){
+    const rec = await getRecording(id);
+    if(!rec){ alert('Recording not found'); return; }
+    if(currentMode==='hard'){
+      if(!lastPosition){ alert('No GPS fix. Move around or allow location.'); return; }
+      const d = distanceKm(lastPosition.latitude,lastPosition.longitude,rec.lat,rec.lng);
+      if(d>50){ alert(`Hard mode: you must be within 50 km to listen. You are ${d.toFixed(1)} km away.`); return; }
+    }
+    // else easy mode -> play
+    const blob = rec.blob;
+    const url = URL.createObjectURL(blob);
+    player.src = url; player.style.display='block'; player.play();
+  }
+
+  // -------------------- recording --------------------
+  let mediaStream=null, recorder=null, chunks=[];
+  async function ensureMic(){
+    if(mediaStream) return mediaStream;
+    mediaStream = await navigator.mediaDevices.getUserMedia({audio:true});
+    return mediaStream;
+  }
+  recBtn.onclick = async ()=>{
+    if(recBtn.dataset.state==='recording'){
+      // stop
+      recorder.stop();
+      recBtn.dataset.state=''; recBtn.textContent='●';
+    } else {
+      try{
+        await ensureMic();
+        recorder = new MediaRecorder(mediaStream,{mimeType:'audio/webm'});
+        chunks=[];
+        recorder.ondataavailable = e=>chunks.push(e.data);
+        recorder.onstop = async ()=>{
+          const blob = new Blob(chunks,{type:'audio/webm'});
+          // location at time of recording
+          if(!lastPosition){ alert('No GPS fix — recording saved but no location.'); }
+          const id = 'r_'+Date.now();
+          const rec = {id, t:Date.now(), lat:lastPosition?lastPosition.latitude:0, lng:lastPosition?lastPosition.longitude:0, title:'Clip '+(new Date()).toLocaleTimeString(), blob};
+          // IndexedDB can't store blob directly in some browsers — but usually it's fine. We store it as is.
+          await saveRecording(rec);
+          await renderRecordings();
+          // optionally show a notification immediately
+          if(Notification.permission==='granted') navigator.serviceWorker.controller?.postMessage({type:'show-recorded',title:rec.title});
+        };
+        recorder.start();
+        recBtn.dataset.state='recording'; recBtn.textContent='■';
+      }catch(err){ alert('Microphone access denied or not available.'); }
+    }
+  };
+
+  // -------------------- simple prompts (notifications) --------------------
+  let promptsTimer=null;
+  document.getElementById('startPrompts').onclick = ()=>{
+    if(Notification.permission!=='granted'){ alert('Please allow notifications to use prompts'); return; }
+    if(promptsTimer) return; // already running
+    promptsTimer = setInterval(()=>{
+      // show local notification that asks to record
+      if(navigator.serviceWorker && navigator.serviceWorker.controller){
+        navigator.serviceWorker.controller.postMessage({type:'ask-record'});
+      } else {
+        new Notification('SoundMap — record?', {body:'Tap to open and record a sound near you.'}).onclick = ()=>window.focus();
+      }
+    }, 1000*60*5); // every 5 minutes
+    alert('Prompts started (every 5 minutes while app is open). Background scheduling requires push or OS support.');
+  };
+  document.getElementById('stopPrompts').onclick = ()=>{ if(promptsTimer){ clearInterval(promptsTimer); promptsTimer=null; alert('Prompts stopped'); } };
+
+  // -------------------- service worker (inline) --------------------
+  const swSource = `
+  self.addEventListener('install', event=>{ self.skipWaiting(); });
+  self.addEventListener('activate', event=>{ event.waitUntil(self.clients.claim()); });
+  self.addEventListener('notificationclick', event=>{
+    event.notification.close();
+    event.waitUntil(self.clients.matchAll({type:'window'}).then(clients=>{
+      if(clients.length>0) return clients[0].focus();
+      return self.clients.openWindow('/');
+    }));
+  });
+  self.addEventListener('message', event=>{
+    const data = event.data || {};
+    if(data.type==='ask-record'){
+      self.registration.showNotification('SoundMap — Quick record', {body:'Open app to record the sounds nearby', tag:'soundmap-ask'});
+    }
+    if(data.type==='show-recorded'){
+      self.registration.showNotification('Saved recording', {body:data.title||'New clip', tag:'soundmap-saved'});
+    }
+  });
+  `;
+
+  async function registerSW(){
+    if('serviceWorker' in navigator){
+      const blob = new Blob([swSource],{type:'application/javascript'});
+      const url = URL.createObjectURL(blob);
+      try{ await navigator.serviceWorker.register(url); console.log('SW registered'); }
+      catch(e){ console.warn('SW failed',e); }
+    }
+  }
+
+  // -------------------- permissions startup --------------------
+  async function init(){
+    initMap();
+    await registerSW();
+    // request basic permissions
+    if('permissions' in navigator){
+      try{
+        const p = await navigator.permissions.query({name:'notifications'});
+        notifStatus.textContent = 'Notif: '+p.state;
+        p.onchange = ()=> notifStatus.textContent = 'Notif: '+p.state;
+      }catch(e){ /* ignore */ }
+    }
+    if(Notification.permission==='default'){
+      try{ await Notification.requestPermission(); }catch(e){}
+    }
+    notifStatus.textContent = 'Notif: '+Notification.permission;
+
+    // try to enable mic (deferred until first recording)
+    // start GPS
+    startGeolocation();
+
+    await renderRecordings();
+
+    // message handler from SW
+    navigator.serviceWorker.addEventListener('message', ev=>{
+      console.log('sw msg', ev.data);
+    });
+
+    // when user clicks notification while app is open, focus / show
+    window.addEventListener('focus', renderRecordings);
+  }
+
+  // -------------------- simple persistence cleanup for demo --------------------
+  // On first load show instructions
+  window.addEventListener('load', ()=>{
+    init();
+    setTimeout(()=>{
+      if(confirm('This demo will request location, microphone and notification permissions. Continue?')){}
+    },200);
+  });
+
+  </script>
+
+  <!-- PWA manifest provisioning: generated from JS when adding to homescreen is attempted. -->
+</body>
+</html>
